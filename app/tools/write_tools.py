@@ -1,5 +1,5 @@
 from pathlib import Path
-from app.schemas.base_tool_schema import ToolBase, Function, Parameters, Properties
+from app.schemas.base_tool_schema import ToolBase, Function, Parameters, Property
 
 
 def __write_file(file_path: str, content: str) -> str:
@@ -41,11 +41,11 @@ WRITE_TOOLS = {
                 description="Write content to a file if exist else create one and write",
                 parameters=Parameters(
                     properties={
-                        "file_path": Properties(
+                        "file_path": Property(
                             type="string",
                             description="The path of the file to write to if not provided use current directory",
                         ),
-                        "content": Properties(
+                        "content": Property(
                             type="string",
                             description="The content to write to the file",
                         ),

@@ -2,14 +2,14 @@ from typing import Callable, Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-class Properties(BaseModel):
+class Property(BaseModel):
     property_type: str = Field(alias="type", default="object")
     description: str
 
 
 class Parameters(BaseModel):
     parameter_type: str = Field(alias="type", default="object")
-    properties: dict[str, Properties] = Field(default_factory=dict)
+    properties: dict[str, Property] = Field(default_factory=dict)
 
 
 class Function(BaseModel):

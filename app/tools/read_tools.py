@@ -1,5 +1,5 @@
 import os
-from app.schemas.base_tool_schema import ToolBase, Function, Parameters, Properties
+from app.schemas.base_tool_schema import Property, ToolBase, Function, Parameters
 
 
 def __read_file(file_path: str) -> str:
@@ -28,7 +28,6 @@ def __read_file(file_path: str) -> str:
             return f.readlines()
     except FileNotFoundError:
         return f"File named {file_path} does not exist."
-
     except PermissionError as p:
         return f"File named {file_path} cannot be read due to permission restrictions."
 
@@ -41,7 +40,7 @@ READ_TOOLS = {
                 description="Read and return the contents of a file or file at any path if not give use current directory.",
                 parameters=Parameters(
                     properties={
-                        "file_path": Properties(
+                        "file_path": Property(
                             type="string",
                             description="The path to the file to read.",
                         )

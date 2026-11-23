@@ -7,6 +7,7 @@ from openai.types.chat import ChatCompletion
 from app.config import Config
 from app.schemas.base_tool_schema import Tool, Mode
 from app.utils.console import log, ask_approval, GREY, RED, GREEN, CYAN, YELLOW
+from app.utils.skills_loader import __load_skills
 
 # These tools only read so no need to check them
 SAFE_TOOLS = ["read_file", "check_platform_system"]
@@ -41,7 +42,7 @@ MAX_TIMEOUT = 120
 def __get_llm() -> OpenAI:
     try:
         if not Config.API_KEY:
-            raise RuntimeError("OPENROUTER_API_KEY is not set")
+            raise RuntimeError("MODEL API KEY is not set")
 
         client = OpenAI(api_key=Config.API_KEY, base_url=Config.BASE_URL)
 
@@ -189,7 +190,10 @@ def __invoke_tool_and_get_response(
 
             if verdict == "blocked":
                 # Too destructive, we never run this even if user says yes
-                log("  WARNING: this is too destructive, the agent will not run it.", RED)
+                log(
+                    "  WARNING: this is too destructive, the agent will not run it.",
+                    RED,
+                )
                 log("  If you really need it, run it yourself:", RED)
                 log(f"  {arguments}", YELLOW)
                 tool_result = (
@@ -266,6 +270,8 @@ def _call_reactive_agent(query: str, tools: dict[str, Tool] = {}, mode: Mode = "
                 "You may call tools multiple times. "
                 "Continue using tools until the task is completed. "
                 "If user denies a tool call do not retry it."
+                "You have access to the following skills: "
+                f"{__load_skills()}"
             ),
         },
         {"role": "user", "content": query},
