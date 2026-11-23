@@ -15,7 +15,7 @@ def main():
     try:
         response = _call_reactive_agent(args.p, ALL_TOOLS)
     except Exception as e:
-        response = f"Unexpected Error: {e}"
+        response = f"Unexpected Error Occurred: {e}"
 
     print(response)
 
