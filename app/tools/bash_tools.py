@@ -3,7 +3,7 @@ import re
 import signal
 import subprocess
 import platform
-from app.schemas.base_tool_schema import ToolBase, Function, Parameters, Properties
+from app.schemas.base_tool_schema import ToolBase, Function, Parameters, Property
 
 
 def __check_if_command_is_safe(system: str, command: str) -> tuple[str, bool]:
@@ -204,11 +204,11 @@ BASH_TOOLS = {
                 description="Execute a shell command for all kind of tasks also can checks if command is malicious before execution.",
                 parameters=Parameters(
                     properties={
-                        "command": Properties(
+                        "command": Property(
                             type="string",
                             description="The command to execute",
                         ),
-                        "system": Properties(
+                        "system": Property(
                             type="string",
                             description="The system/OS name, e.g. 'Linux', 'Windows' or 'Java'.",
                         ),
