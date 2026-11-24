@@ -20,7 +20,6 @@ def __parse_skill(file: Path) -> tuple[str | None, str | None]:
     skill_description: str | None
         This is skill description for give SKILL.md.
     """
-
     skill_name, skill_description = None, None
     try:
         with Path.open(file, mode="r") as f:
@@ -72,7 +71,7 @@ def __convert_skills_to_text_form(skills: dict) -> str:
     return skills_str
 
 
-def __find_claude_skills_path() -> Path:
+def __find_claude_skills_path() -> list[Path]:
     """
     This function scan the .claude path in the parent folder.
 
@@ -82,15 +81,15 @@ def __find_claude_skills_path() -> Path:
 
     Returns
     -------
-    str:
-        Claude path or empty path if no .claude found else empty path.
+    claude__skills_paths: list[Path]
+        Claude path list or empty list of path if no .claude/skills found.
     """
     parent_path = Config.PARENT_FOLDER_PATH
-
-    for path in parent_path.rglob(".claude"):
+    claude__skills_paths = []
+    for path in parent_path.rglob(".claude/skills"):
         if path.is_dir():
-            return path
-    return Path("")
+            claude__skills_paths.append(path)
+    return claude__skills_paths
 
 
 def __load_skills() -> str:
@@ -113,18 +112,18 @@ def __load_skills() -> str:
     # Get the working path of skills
     skills = {}
     try:
-        claude_path = __find_claude_skills_path()
-        if claude_path == Path(""):
+        claude_skills_paths = __find_claude_skills_path()
+
+        if claude_skills_paths == Path(""):
             return ""  # Empty skills
-        skills_path = claude_path / "skills"
-        for dir in skills_path.iterdir():
-            for file in dir.iterdir():
-                if "SKILL.md" == file.name:
-                    skill_name, skill_description = __parse_skill(file)
-                    if skill_name and skill_description:
-                        skills[skill_name] = skill_description
+
+        for skills_path in claude_skills_paths:
+            for file in skills_path.rglob("SKILL.md"):
+                skill_name, skill_description = __parse_skill(file)
+                if skill_name and skill_description:
+                    skills[skill_name] = skill_description
         skill_str = __convert_skills_to_text_form(skills)
     except Exception as e:
-        log(f"Unable to load skills reason {e.__str__()[:20]}", RED)
+        log(f"Unable to load skills reason {e.__str__()}", RED)
         return ""  # No skills to load due to some issue.
     return skill_str

@@ -20,4 +20,4 @@ class Config:
         "medium": MAX_ITERATIONS_MEDIUM_MODE,
         "high": MAX_ITERATIONS_HIGH_MODE,
     }
-    PARENT_FOLDER_PATH = Path(__file__).resolve().parent.parent
+    PARENT_FOLDER_PATH = Path(__file__).resolve().parent
