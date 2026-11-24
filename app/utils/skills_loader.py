@@ -50,7 +50,9 @@ def __parse_skill(file: Path) -> tuple[str | None, str | None, str]:
     skill_content = ""
 
     if content_start_index and content_start_index < len(content):
-        skill_content = "".join(content[content_start_index + 1 :]).strip("/n").strip()
+        skill_content = (
+            "".join(content[content_start_index + 1 :]).rstrip("\n").lstrip("\n")
+        )
 
     return skill_name, skill_description, skill_content
 
@@ -89,7 +91,7 @@ def __convert_skills_to_text_form(
     for skill_name, skill_description in skills_name_des.items():
         skills_str += f"- {skill_name}: {skill_description}\n"
         if add_content:
-            skills_str += f" {skills_name_des[skill_name]}\n"
+            skills_str += f" {skill_name_cont[skill_name]}\n"
     return skills_str
 
 
@@ -147,5 +149,5 @@ def __load_skills(skill_name: str = "") -> str:
                     skill_name_cont[skill_name] = skill_content
     except Exception as e:
         log(f"Unable to load skills reason {e.__str__()}", RED)
-        return ""  # No skills to load due to some issue.
+        return skills_name_des, skill_name_cont  # No skills to load due to some issue.
     return skills_name_des, skill_name_cont

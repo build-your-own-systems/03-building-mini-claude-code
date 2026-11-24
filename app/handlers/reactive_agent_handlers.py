@@ -245,7 +245,7 @@ def _call_reactive_agent(query: str, tools: dict[str, Tool] = {}, mode: Mode = "
     if query.startswith("/"):
         skill_name = query.removeprefix("/")
         skill_des_map, skill_content_map = __load_skills(skill_name)  # Load given skill
-        if skill_des_map and skill_name:
+        if skill_name in skill_des_map:
             query = skill_content_map[skill_name]
     else:
         skill_des_map, skill_content_map = __load_skills()  # Load all skills

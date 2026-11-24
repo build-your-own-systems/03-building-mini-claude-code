@@ -29,6 +29,8 @@ The point of this repo is the *mechanism*: how a model is told which tools exist
 ```mermaid
 flowchart TD
     CLI["🖥️ CLI<br/>uv run python -m app.main -p task"]
+    SK["📚 Skills<br/>.claude/skills/*/SKILL.md"]
+    PY["📝 prompts.yaml<br/>every prompt + placeholders"]
     ALL["🗂️ ALL_TOOLS registry<br/>read_file · write_file<br/>check_platform_system · bash_tool"]
     MSG["💬 messages<br/>system · user · assistant · tool"]
     LLM["🧠 LLM<br/>chat.completions"]
@@ -42,7 +44,10 @@ flowchart TD
     OUT["✅ Final answer"]
 
     CLI --> ALL
-    CLI -->|the task| MSG
+    CLI -->|the task or /skill_name| MSG
+    SK -->|name + description<br/>or the skill body| MSG
+    PY -->|system prompt| MSG
+    PY -.->|guardrail prompt| GR
     ALL -->|schemas only| MSG
     MSG --> LLM
     LLM --> CHK
@@ -60,6 +65,8 @@ flowchart TD
     DENY -->|tool result| MSG
 
     style CLI fill:#1f6feb,stroke:#1f6feb,color:#fff
+    style SK fill:#116329,stroke:#116329,color:#fff
+    style PY fill:#57606a,stroke:#57606a,color:#fff
     style ALL fill:#8250df,stroke:#8250df,color:#fff
     style LLM fill:#bf3989,stroke:#bf3989,color:#fff
     style DISP fill:#bc4c00,stroke:#bc4c00,color:#fff
@@ -155,6 +162,9 @@ That is why it is called a reactive agent, and it is the only thing separating t
 | 🙋 Ask before anything risky | *approval prompt* | `input()` with `[y/N]`, default is No |
 | ⛔ Never run the really bad stuff | *blocked* | not even with a yes, you get the command to run yourself |
 | ⏱️ Don't hang on a tool | *timeout* | guardrail suggests one, 5s if it doesn't |
+| 📚 Know its skills | *skills loader* | `rglob` for `.claude/skills/**/SKILL.md`, name + description go into the system prompt |
+| 🪄 Run a skill on demand | `/skill_name` | that skill's `SKILL.md` body becomes the task |
+| 📝 Keep prompts out of the code | `prompts.yaml` | one YAML file, `{placeholders}` filled with `str.format` |
 
 ---
 
@@ -203,6 +213,16 @@ Something less extreme, like deleting a file in the project, comes back as `unsa
 ```
 
 The step logs go to `stderr`, so `stdout` still only has the final answer.
+
+Skills are called with a slash:
+
+```bash
+$ uv run python -m app.main -p "/apple"
+# → blueberry   (the skill body says to reply with exactly that word)
+
+$ uv run python -m app.main -p "/banana"
+# → skill not found   (no such SKILL.md, so the model is told not to improvise)
+```
 
 ---
 
@@ -322,11 +342,11 @@ Returning the return code separately sounds pedantic until you notice that *"the
 
 <br/>
 
-| mode | max iterations |
+| mode | max iterations (default) |
 |---|---|
-| `low` | 5 |
-| `medium` | 5 |
-| `high` | 15 |
+| `low` | 20 |
+| `medium` | 30 |
+| `high` | 40 |
 
 I once watched a model call the same tool four times in a row, getting the same result each time and being no closer to an answer.
 
@@ -350,11 +370,13 @@ Then I asked it to *"create a python file for shutdown and run it"*. It did exac
 
 Each step looks innocent on its own. The danger is in the **combination**, and a regex only ever sees one command.
 
-So before any non read-only tool runs, I ask the LLM again, this time with a different job:
+So before any non read-only tool runs, I ask the LLM again, this time with a different job (the prompt lives in `prompts.yaml`, see section 9):
 
-```python
-GUARDRAIL_PROMPT = """You are a security checker for a coding agent...
-Reply in one line as: <safe, unsafe or blocked> | <timeout> | <reason>"""
+```yaml
+guardrail:
+  system: |-
+    You are a security checker for a coding agent...
+    Reply in one line as: <safe, unsafe or blocked> | <timeout> | <reason>
 ```
 
 The trick is what I send with it: **every previous tool call in the conversation**. So when it sees `python shutdown.py`, it can also see what was written into `shutdown.py` one step earlier.
@@ -376,16 +398,81 @@ Python can't kill a thread, so the real fix lives in `bash_tool`: it gets the ti
 
 </details>
 
+<details>
+<summary><b>8. How it learns new tricks</b> — skills, <code>app/utils/skills_loader.py</code></summary>
+
+<br/>
+
+A skill is just a folder with a `SKILL.md`: frontmatter on top, instructions below.
+
+```markdown
+---
+name: grape
+description: Runs the grape test suite and reports failures.
+---
+
+Runs the grape test suite and reports failures.
+```
+
+On every run the loader `rglob`s `app/` for `.claude/skills` folders, then for every `SKILL.md` inside them, and pulls out three things: **name**, **description** and **body**.
+
+There are two ways a skill gets used:
+
+- **Normal query** → only the `- name: description` lines go into the system prompt. The model knows the skill exists, and the body costs zero tokens.
+- **`/skill_name`** → the loader looks for `<skill_name>/SKILL.md` only, and that skill's body **replaces** the query. If there is no such skill, the query goes through untouched and the system prompt tells the model to say *skill not found* instead of making something up.
+
+`apple` is my canary. Its body says to reply with exactly one word: `blueberry`. If `/apple` answers `blueberry`, the body really made it into the conversation. If it starts talking about deploy targets, the model is just guessing from the description.
+
+</details>
+
+<details>
+<summary><b>9. Why the prompts live in YAML</b> — <code>app/prompts/prompts.yaml</code></summary>
+
+<br/>
+
+The prompts used to be Python strings spread across the handler: a triple-quoted guardrail constant at the top, the agent prompt glued together from string fragments inside the loop, and two tool-result messages inline in the dispatch code. Changing one word meant scrolling through code that had nothing to do with wording.
+
+Now every prompt is in one file, with `{placeholders}` for whatever gets filled in at runtime:
+
+```yaml
+guardrail:
+  user: |-
+    Previous tool calls: {previous_calls}
+    Tool call to check: {tool_name}({tool_arguments})
+```
+
+and the code just names the prompt and passes the values:
+
+```python
+__get_prompt(
+    "guardrail.user",
+    previous_calls=previous_calls,
+    tool_name=tool_call.function.name,
+    tool_arguments=tool_call.function.arguments,
+)
+```
+
+`prompts_loader.py` reads the YAML once (`@cache`), walks the dotted key, and calls `str.format`. A tool argument full of JSON `{}` is fine, since `format` only parses braces in the template, never in the values.
+
+The one gotcha: a literal `{` written in the YAML itself has to be `{{`.
+
+</details>
+
 ---
 
 ## 📁 Project Structure
 
 ```text
 app/
+├── .claude/skills/                # 📚 One folder per skill
+│   ├── apple/SKILL.md             #    canary skill, replies "blueberry"
+│   └── grape/SKILL.md
 ├── main.py                        # CLI entry, merges tools, calls the agent
 ├── config.py                      # Env settings, model, iteration caps
 ├── handlers/
-│   └── reactive_agent_handlers.py # 🔁 The agent loop, tool dispatch and 🛡️ guardrail
+│   └── reactive_agent_handlers.py # 🔁 The agent loop, /skill routing, tool dispatch and 🛡️ guardrail
+├── prompts/
+│   └── prompts.yaml               # 📝 Every prompt, with {placeholders}
 ├── schemas/
 │   └── base_tool_schema.py        # Pydantic tool schema + validation
 ├── tools/
@@ -393,7 +480,9 @@ app/
 │   ├── write_tools.py             # write_file
 │   └── bash_tools.py              # check_platform_system, bash_tool (+ regex blacklist)
 └── utils/
-    └── console.py                 # Coloured step logs and the y/N approval prompt
+    ├── console.py                 # Coloured step logs and the y/N approval prompt
+    ├── prompts_loader.py          # Reads prompts.yaml, fills the placeholders
+    └── skills_loader.py           # Finds SKILL.md files, parses frontmatter + body
 ```
 
 ---
@@ -412,9 +501,9 @@ Put your model access in a `.env`:
 MODEL_API_KEY=your_key_here
 MODEL_BASE_URL=https://openrouter.ai/api/v1
 MODEL_NAME=nvidia/nemotron-3-ultra-550b-a55b:free
-MAX_ITERATIONS_LOW_MODE=5
-MAX_ITERATIONS_MEDIUM_MODE=5
-MAX_ITERATIONS_HIGH_MODE=15
+MAX_ITERATIONS_LOW_MODE=20
+MAX_ITERATIONS_MEDIUM_MODE=30
+MAX_ITERATIONS_HIGH_MODE=40
 ```
 
 Only the API key is required — everything else has a default.
@@ -431,7 +520,10 @@ uv run python -m app.main -p "what operating system am I on?"
 uv run python -m app.main -p "read app/config.py and explain the settings"
 uv run python -m app.main -p "create hello.py that prints hello world"
 uv run python -m app.main -p "find where write_file is defined and summarise it"
+uv run python -m app.main -p "/apple"
 ```
+
+To add your own skill, drop a folder with a `SKILL.md` into `app/.claude/skills/`. It gets picked up on the next run.
 
 > ⚠️ **This thing has a shell and a writer.** It can genuinely change your machine. The guardrail asks before anything that looks risky, but it is an LLM judging an LLM — not a sandbox. Point it at a folder you are willing to let it touch.
 
