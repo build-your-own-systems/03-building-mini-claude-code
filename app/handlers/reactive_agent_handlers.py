@@ -7,33 +7,11 @@ from openai.types.chat import ChatCompletion
 from app.config import Config
 from app.schemas.base_tool_schema import Tool, Mode
 from app.utils.console import log, ask_approval, GREY, RED, GREEN, CYAN, YELLOW
-from app.utils.skills_loader import __load_skills
+from app.utils.skills_loader import __convert_skills_to_text_form, __load_skills
+from app.utils.prompts_loader import __get_prompt
 
 # These tools only read so no need to check them
 SAFE_TOOLS = ["read_file", "check_platform_system"]
-
-GUARDRAIL_PROMPT = """You are a security checker for a coding agent that runs on the user's machine.
-You will get a tool call and the previous tool calls made by the agent.
-
-Reply "blocked" if the tool call is totally destructive and can not be undone, for example:
-- shutdown, restart or logoff the machine
-- format or wipe a disk, delete system folders or the whole drive (rm -rf /, del /s C:\\)
-- delete or edit registry, boot config or system services
-- fork bombs or anything that can crash the machine
-- write a script that does any of above, or run a script that was written with such code
-
-Reply "unsafe" if the tool call can harm the system but user may still want it, for example:
-- delete or overwrite files in the project
-- read secrets like .env or ssh keys, or send data to internet
-- install packages or run a script whose content you can not see
-
-Reply "safe" only if you are sure it is harmless.
-
-Also give a timeout in seconds that is enough for this tool call to finish.
-For example reading or writing a file needs 5, running tests or installing packages may need 60.
-
-Reply in one line as: <safe, unsafe or blocked> | <timeout> | <reason>
-Example: blocked | 5 | script calls shutdown"""
 
 DEFAULT_TIMEOUT = 5
 MAX_TIMEOUT = 120
@@ -116,12 +94,14 @@ def __call_tool_guardrail_agent(tool_call, messages: list) -> tuple[str, int, st
         response = client.chat.completions.create(
             model=Config.MODEL_NAME,
             messages=[
-                {"role": "system", "content": GUARDRAIL_PROMPT},
+                {"role": "system", "content": __get_prompt("guardrail.system")},
                 {
                     "role": "user",
-                    "content": (
-                        f"Previous tool calls: {previous_calls}\n"
-                        f"Tool call to check: {tool_call.function.name}({tool_call.function.arguments})"
+                    "content": __get_prompt(
+                        "guardrail.user",
+                        previous_calls=previous_calls,
+                        tool_name=tool_call.function.name,
+                        tool_arguments=tool_call.function.arguments,
                     ),
                 },
             ],
@@ -196,17 +176,14 @@ def __invoke_tool_and_get_response(
                 )
                 log("  If you really need it, run it yourself:", RED)
                 log(f"  {arguments}", YELLOW)
-                tool_result = (
-                    "This tool call was BLOCKED because it is destructive and it was not executed. "
-                    "Do not retry it in any other way. Tell the user to run it themselves if they really need it."
-                )
+                tool_result = __get_prompt("tool_results.blocked")
             elif verdict == "safe" or ask_approval(function_name):
                 tool_result = __call_function_with_timeout(
                     function=tool["function"], arguments=arguments, timeout=timeout
                 )
                 log(f"  <- {str(tool_result)[:200]}", GREY)
             else:
-                tool_result = "User denied this tool call. Do not retry it, tell the user why you needed it."
+                tool_result = __get_prompt("tool_results.denied")
                 log("  denied by user", RED)
 
             tool_call_results.append(
@@ -261,17 +238,26 @@ def _call_reactive_agent(query: str, tools: dict[str, Tool] = {}, mode: Mode = "
     finish_reason = "NOT SOLVED"
     max_iteration = Config.REACTIVE_AGENT_MODES[mode]
     iteration = 0
+
+    # Decide either calling skill or is user query
+    # If /apple this will be considered as skills first
+    # If no relevant skill found will be passed as query.
+    if query.startswith("/"):
+        skill_name = query.removeprefix("/")
+        skill_des_map, skill_content_map = __load_skills(skill_name)  # Load given skill
+        if skill_name in skill_des_map:
+            query = skill_content_map[skill_name]
+    else:
+        skill_des_map, skill_content_map = __load_skills()  # Load all skills
+
     messages = [
         {
             "role": "system",
-            "content": (
-                "You are an intelligent coding agent. "
-                "Use the available tools whenever necessary to complete the task. "
-                "You may call tools multiple times. "
-                "Continue using tools until the task is completed. "
-                "If user denies a tool call do not retry it."
-                "You have access to the following skills: "
-                f"{__load_skills()}"
+            "content": __get_prompt(
+                "reactive_agent.system",
+                skills=__convert_skills_to_text_form(
+                    skill_des_map, skill_content_map, False
+                ),
             ),
         },
         {"role": "user", "content": query},
